@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Domain Dashboard — DR / DA / PA / Availability</title>
+<style>
+*{box-sizing:border-box}body{font-family:system-ui,sans-serif;margin:0;background:#0f1115;color:#e8e8e8}
+.wrap{max-width:1100px;margin:0 auto;padding:16px}
+.card{background:#161a22;border:1px solid #2a2f3a;border-radius:10px;padding:12px;margin:10px 0}
+input,select,textarea,button{background:#0f1319;color:#e8e8e8;border:1px solid #333;border-radius:6px;padding:8px;margin:4px 0;width:100%}
+button{cursor:pointer;background:#2563eb;border:none;font-weight:600}button:hover{background:#1d4ed8}button.ghost{background:#2a2f3a}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.stat{background:#0f1319;border:1px solid #2a2f3a;border-radius:8px;padding:10px;text-align:center}
+.stat b{font-size:22px;display:block}.stat span{font-size:12px;color:#9aa3b2}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{border-bottom:1px solid #2a2f3a;padding:6px;text-align:left}
+th{position:sticky;top:0;background:#161a22;cursor:pointer;user-select:none}
+tr:hover td{background:#1a2030}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700}
+.av{background:#065f46}.rg{background:#7f1d1d}.uk{background:#4b5563}
+.filters{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr 1fr;gap:8px}
+.note{border-left:4px solid #f59e0b;padding:8px 10px;font-size:13px;color:#d1d5db}
+#bar{height:8px;background:#2a2f3a;border-radius:4px;overflow:hidden;margin-top:8px;display:none}
+#barFill{height:100%;width:0;background:#2563eb}
+#status{font-size:13px;color:#9aa3b2;margin-top:6px}
+.err{color:#f87171;font-size:11px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h2>Domain Dashboard — DR / DA / PA / Availability</h2>
+<div class="note">Ahrefs DR needs a paid token. DA/PA use free Moz keys. ExpiredDomains lists need a free account login. Availability uses free RDAP+DNS (no keys). Runs are batched so large lists don't time out.</div>
+
+<div class="card">
+<h3>1. API keys</h3>
+<div class="grid3">
+<input id="ahrefs" placeholder="Ahrefs token (paid, for DR)">
+<input id="mozId" placeholder="Moz Access ID (free, for DA/PA)">
+<input id="mozKey" type="password" placeholder="Moz Secret Key (free)">
+</div>
+<div class="grid2">
+<input id="edUser" placeholder="ExpiredDomains username (free account)">
+<input id="edPass" type="password" placeholder="ExpiredDomains password">
+</div>
+</div>
+
+<div class="card">
+<h3>2. Load domains</h3>
+<div class="grid3">
+<select id="tld"><option value="com">expired .com</option><option value="net">expired .net</option><option value="org">expired .org</option><option value="io">expired .io</option></select>
+<input id="limit" type="number" value="100" min="10" max="500">
+<button onclick="fetchExpired()">Fetch Expireddomains.net</button>
+</div>
+<textarea id="domains" rows="6" placeholder="one domain per line"></textarea>
+<div class="grid3">
+<label style="font-size:13px">Excel/CSV/TXT:<input type="file" id="csv" accept=".csv,.txt,.xls,.xlsx"></label>
+<button onclick="run()">Check DR / DA / PA</button>
+<button onclick="checkAvail()" class="ghost">Check availability</button>
+</div>
+<div id="bar"><div id="barFill"></div></div>
+<div id="status"></div>
+</div>
+
+<div class="card">
+<h3>3. Results <span id="count"></span>
+<button onclick="downloadCSV()" style="width:auto">Download filtered CSV</button>
+<button onclick="clearAll()" class="ghost" style="width:auto">Clear</button></h3>
+<div class="stats">
+<div class="stat"><b id="sTotal">0</b><span>domains</span></div>
+<div class="stat"><b id="sAvg">-</b><span>avg DR</span></div>
+<div class="stat"><b id="sGood">0</b><span>DR 30+</span></div>
+<div class="stat"><b id="sAv">0</b><span>available</span></div>
+<div class="stat"><b id="sReg">0</b><span>registered</span></div>
+</div>
+<div class="filters" style="margin-top:8px">
+<input id="fSearch" placeholder="search..." oninput="applyFilters()">
+<input id="fMinDR" type="number" placeholder="min DR" oninput="applyFilters()">
+<input id="fMinDA" type="number" placeholder="min DA" oninput="applyFilters()">
+<input id="fMinPA" type="number" placeholder="min PA" oninput="applyFilters()">
+<select id="fTld" onchange="applyFilters()"><option value="">all TLDs</option><option value="com">.com</option><option value="net">.net</option><option value="org">.org</option><option value="io">.io</option></select>
+<select id="fStatus" onchange="applyFilters()"><option value="">any status</option><option value="available">available</option><option value="registered">registered</option><option value="unknown">unknown</option></select>
+</div>
+<div class="filters" style="margin-top:4px;grid-template-columns:1fr 1fr">
+<select id="fSort" onchange="applyFilters()"><option value="dr_desc">sort: DR high first</option><option value="dr_asc">sort: DR low first</option><option value="da_desc">sort: DA high first</option><option value="domain">sort: A–Z</option></select>
+<label style="font-size:13px"><input type="checkbox" id="fHideErr" onchange="applyFilters()" style="width:auto"> hide rows with metric errors</label>
+</div>
+<table><thead><tr><th onclick="setSort('domain')">Domain</th><th onclick="setSort('dr_desc')">DR</th><th onclick="setSort('da_desc')">DA</th><th>PA</th><th>Status</th><th>Notes</th></tr></thead><tbody id="out"></tbody></table>
+</div>
+</div>
+
+<script>
+let all=[]; // {domain,dr,da,pa,status,detail,drError,mozError}
+const val=id=>document.getElementById(id).value.trim();
+function setStatus(s){document.getElementById('status').textContent=s;}
+function progress(done,total){const b=document.getElementById('bar');b.style.display='block';document.getElementById('barFill').style.width=Math.round(done/total*100)+'%';}
+function progressDone(){document.getElementById('bar').style.display='none';}
+
+document.getElementById('csv').addEventListener('change',async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  setStatus('Uploading '+f.name+'...');
+  const fd=new FormData(); fd.append('file',f);
+  const r=await fetch('/api/upload',{method:'POST',body:fd});
+  const j=await r.json();
+  if(j.domains&&j.domains.length){merge(j.domains.map(d=>({domain:d})));setStatus('Loaded '+j.count+' domains from file.');}
+  else setStatus('File error: '+(j.error||'no domains found'));
+});
+async function fetchExpired(){
+  const body={tld:val('tld'),limit:val('limit'),edUser:val('edUser'),edPass:val('edPass')};
+  setStatus('Fetching from Expireddomains.net...');
+  const r=await fetch('/api/expired',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json();
+  if(j.domains&&j.domains.length){merge(j.domains.map(d=>({domain:d})));setStatus(`Loaded ${j.count}. ${j.warning||''}`);}
+  else setStatus('FAILED: '+(j.error||'empty')+' '+(j.fix||''));
+}
+function merge(list){
+  const map=Object.fromEntries(all.map(x=>[x.domain,x]));
+  for(const item of list){ map[item.domain]=Object.assign(map[item.domain]||{domain:item.domain,status:'unknown'},item); }
+  all=Object.values(map); applyFilters();
+}
+async function postBatch(url,body){
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  return r.json();
+}
+async function run(){
+  const domains=val('domains').split(/[\s,;]+/).filter(Boolean);
+  if(!domains.length&&!all.length) return setStatus('Paste, fetch or upload domains first.');
+  const list=[...new Set([...all.map(x=>x.domain),...domains])];
+  merge(list.map(d=>({domain:d})));
+  const keys={ahrefsToken:val('ahrefs'),mozAccessId:val('mozId'),mozSecretKey:val('mozKey')};
+  const B=25; let done=0;
+  for(let i=0;i<list.length;i+=B){
+    setStatus(`Checking metrics ${Math.min(i+B,list.length)}/${list.length}...`);
+    const j=await postBatch('/api/check',{domains:list.slice(i,i+B),...keys});
+    if(j.results) merge(j.results);
+    done+=B; progress(done,list.length);
+  }
+  progressDone(); setStatus('Metrics done: '+list.length+' domains.');
+}
+async function checkAvail(){
+  if(!all.length) return setStatus('Load domains first.');
+  const list=all.map(x=>x.domain), B=50; let done=0;
+  for(let i=0;i<list.length;i+=B){
+    setStatus(`Checking availability ${Math.min(i+B,list.length)}/${list.length}...`);
+    const j=await postBatch('/api/availability',{domains:list.slice(i,i+B)});
+    if(j.results) merge(j.results);
+    done+=B; progress(done,list.length);
+  }
+  progressDone(); setStatus('Availability done.');
+}
+function setSort(v){document.getElementById('fSort').value=v;applyFilters();}
+function filtered(){
+  const s=val('fSearch').toLowerCase(),tld=val('fTld'),st=val('fStatus'),hide=document.getElementById('fHideErr').checked;
+  const mDR=parseFloat(val('fMinDR')),mDA=parseFloat(val('fMinDA')),mPA=parseFloat(val('fMinPA'));
+  let r=all.filter(x=>
+    (!s||x.domain.includes(s))&&(!tld||x.domain.endsWith('.'+tld))&&(!st||(x.status||'unknown')===st)&&
+    (isNaN(mDR)||(x.dr??-1)>=mDR)&&(isNaN(mDA)||(x.da??-1)>=mDA)&&(isNaN(mPA)||(x.pa??-1)>=mPA)&&
+    (!hide||(!x.drError&&!x.mozError)));
+  const sort=val('fSort'),num=k=>k==null?-1:k;
+  if(sort==='dr_desc')r.sort((a,b)=>num(b.dr)-num(a.dr));
+  if(sort==='dr_asc')r.sort((a,b)=>num(a.dr)-num(b.dr));
+  if(sort==='da_desc')r.sort((a,b)=>num(b.da)-num(a.da));
+  if(sort==='domain')r.sort((a,b)=>a.domain.localeCompare(b.domain));
+  return r;
+}
+function applyFilters(){
+  const r=filtered();
+  document.getElementById('count').textContent='('+r.length+' shown / '+all.length+' total)';
+  const drs=all.map(x=>x.dr).filter(x=>x!=null);
+  document.getElementById('sTotal').textContent=all.length;
+  document.getElementById('sAvg').textContent=drs.length?(drs.reduce((a,b)=>a+b,0)/drs.length).toFixed(1):'-';
+  document.getElementById('sGood').textContent=all.filter(x=>(x.dr??0)>=30).length;
+  document.getElementById('sAv').textContent=all.filter(x=>x.status==='available').length;
+  document.getElementById('sReg').textContent=all.filter(x=>x.status==='registered').length;
+  document.getElementById('out').innerHTML=r.map(x=>{
+    const st=x.status||'unknown';
+    const cls=st==='available'?'av':st==='registered'?'rg':'uk';
+    const errs=[x.drError,x.mozError].filter(Boolean).join(' | ');
+    return `<tr><td>${x.domain}</td><td><b>${x.dr??'-'}</b></td><td>${x.da??'-'}</td><td>${x.pa??'-'}</td><td><span class="badge ${cls}">${st}</span></td><td class="err" title="${(errs+' '+ (x.detail||'')).trim()}">${errs?'metric err':(x.detail||'')}</td></tr>`;
+  }).join('');
+}
+function downloadCSV(){
+  const r=filtered();
+  const csv='domain,dr,da,pa,status\n'+r.map(x=>[x.domain,x.dr??'',x.da??'',x.pa??'',x.status||''].join(',')).join('\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='domains.csv';a.click();
+}
+function clearAll(){all=[];document.getElementById('domains').value='';applyFilters();setStatus('Cleared.');}
+</script>
+</body>
+</html>
